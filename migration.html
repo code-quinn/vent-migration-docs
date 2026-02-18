@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Table-by-Table Migration Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060a12;
+    --surface: #0d1423;
+    --border: #1a2540;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #7fff6e;
+    --accent4: #c77dff;
+    --text: #e8f0fe;
+    --muted: #5a7096;
+    --danger: #ff4d4d;
+    --warn: #ffd166;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    padding: 40px 32px;
+    overflow-x: hidden;
+  }
+
+  /* Grid noise texture */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.25;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; }
+
+  /* ── HEADER ── */
+  .header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 48px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+  }
+  .header-left .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .header-left h1 {
+    font-size: clamp(28px, 4vw, 48px);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -1px;
+  }
+  h1 span { color: var(--accent); }
+  .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid;
+    letter-spacing: 1px;
+  }
+  .badge-blue { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,.07); }
+  .badge-orange { border-color: var(--accent2); color: var(--accent2); background: rgba(255,107,53,.07); }
+  .badge-green { border-color: var(--accent3); color: var(--accent3); background: rgba(127,255,110,.07); }
+  .badge-purple { border-color: var(--accent4); color: var(--accent4); background: rgba(199,125,255,.07); }
+  .header-right { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
+  /* ── SECTION TITLES ── */
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── PHASE STRIP ── */
+  .phases {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    margin-bottom: 48px;
+  }
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid;
+    padding: 16px 18px;
+    position: relative;
+  }
+  .phase:nth-child(1) { border-top-color: var(--accent); }
+  .phase:nth-child(2) { border-top-color: var(--accent4); }
+  .phase:nth-child(3) { border-top-color: var(--accent2); }
+  .phase:nth-child(4) { border-top-color: var(--accent3); }
+  .phase:nth-child(5) { border-top-color: var(--warn); }
+
+  .phase-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    opacity: .5;
+    margin-bottom: 6px;
+  }
+  .phase-title { font-size: 13px; font-weight: 700; line-height: 1.3; }
+  .phase-sub { font-size: 11px; color: var(--muted); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
+
+  /* Arrow between phases */
+  .phases .phase:not(:last-child)::after {
+    content: '▶';
+    position: absolute;
+    right: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: var(--muted);
+    z-index: 2;
+  }
+
+  /* ── MAIN GRID ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  /* ── PANEL ── */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px;
+    border-radius: 2px;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-title .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── TABLE QUEUE ── */
+  .table-queue { display: flex; flex-direction: column; gap: 6px; }
+  .tq-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid var(--border);
+    border-left: 3px solid;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    position: relative;
+    cursor: default;
+    transition: background .2s;
+  }
+  .tq-item:hover { background: rgba(255,255,255,.06); }
+
+  .tq-item .order {
+    font-size: 10px;
+    color: var(--muted);
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .tq-item .name { flex: 1; font-weight: 500; }
+  .tq-item .size {
+    font-size: 9px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 2px;
+  }
+  .tq-item .dep-icon { font-size: 9px; }
+
+  /* Status colors */
+  .t-root  { border-left-color: var(--accent); }
+  .t-dep   { border-left-color: var(--accent4); }
+  .t-child { border-left-color: var(--accent2); }
+  .t-leaf  { border-left-color: var(--accent3); }
+  .t-audit { border-left-color: var(--muted); }
+
+  /* ── FK CONSTRAINT TOGGLE ── */
+  .fk-block {
+    background: rgba(255, 107, 53, .07);
+    border: 1px solid rgba(255, 107, 53, .25);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    border-radius: 2px;
+  }
+  .fk-block .fk-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent2);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .code-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 3px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .code-line .kw { color: var(--accent2); }
+  .code-line .val { color: var(--accent3); }
+  .code-line .cmt { color: var(--muted); }
+
+  /* ── PIPELINE ── */
+  .pipeline { display: flex; flex-direction: column; gap: 10px; }
+  .pipe-step {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    background: rgba(255,255,255,.025);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    position: relative;
+  }
+  .pipe-step::before {
+    content: '';
+    position: absolute;
+    left: 35px;
+    bottom: -10px;
+    width: 1px;
+    height: 10px;
+    background: var(--border);
+  }
+  .pipe-step:last-child::before { display: none; }
+
+  .step-num {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .pipe-step .step-content { flex: 1; }
+  .pipe-step .step-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+  .pipe-step .step-desc { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; line-height: 1.5; }
+  .pipe-step .step-tag { font-size: 9px; padding: 3px 8px; border: 1px solid; border-radius: 2px; white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── VERIFICATION PANEL ── */
+  .verify-grid { display: grid; gap: 8px; }
+  .verify-check {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 10px;
+    align-items: start;
+    padding: 10px 12px;
+    background: rgba(127,255,110,.04);
+    border: 1px solid rgba(127,255,110,.15);
+    border-radius: 2px;
+  }
+  .verify-check .icon { font-size: 12px; }
+  .verify-check .vc-title { font-size: 11px; font-weight: 700; margin-bottom: 2px; }
+  .verify-check .vc-desc { font-size: 10px; color: var(--muted); line-height: 1.4; font-family: 'JetBrains Mono', monospace; }
+  .verify-check .vc-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 2px 7px;
+    border-radius: 2px;
+    background: rgba(127,255,110,.1);
+    color: var(--accent3);
+    border: 1px solid rgba(127,255,110,.2);
+    white-space: nowrap;
+  }
+
+  /* ── BOTTOM GRID ── */
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  /* ── BATCH FLOW ── */
+  .batch-visual {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .batch-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .batch-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    width: 60px;
+    flex-shrink: 0;
+  }
+  .batch-blocks { display: flex; gap: 3px; flex: 1; }
+  .batch-block {
+    height: 20px;
+    border-radius: 2px;
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    transition: opacity .3s;
+  }
+  .b-done  { background: rgba(127,255,110,.25); color: var(--accent3); border: 1px solid rgba(127,255,110,.4); }
+  .b-prog  { background: rgba(0,212,255,.2);    color: var(--accent);   border: 1px solid rgba(0,212,255,.4); animation: pulse 1.5s ease-in-out infinite; }
+  .b-wait  { background: rgba(255,255,255,.04); color: var(--muted);    border: 1px solid var(--border); }
+  .b-fail  { background: rgba(255,77,77,.15);   color: var(--danger);   border: 1px solid rgba(255,77,77,.3); }
+  .b-skip  { background: rgba(255,209,102,.1);  color: var(--warn);     border: 1px solid rgba(255,209,102,.25); }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: .5; }
+  }
+
+  .batch-stat {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    width: 50px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .divider-row {
+    height: 1px;
+    background: var(--border);
+    margin: 10px 0;
+  }
+
+  /* ── METRICS ROW ── */
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 8px; }
+  .metric-card {
+    background: rgba(255,255,255,.03);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    text-align: center;
+  }
+  .metric-val {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .metric-lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ── ROLLBACK PANEL ── */
+  .rollback-steps { display: flex; flex-direction: column; gap: 6px; }
+  .rb-step {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px 12px;
+    border: 1px solid rgba(255,77,77,.15);
+    background: rgba(255,77,77,.04);
+    border-radius: 2px;
+  }
+  .rb-icon { font-size: 12px; flex-shrink: 0; margin-top: 1px; }
+  .rb-text { flex: 1; }
+  .rb-title { font-size: 11px; font-weight: 700; margin-bottom: 2px; }
+  .rb-desc { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; line-height: 1.4; }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    padding: 14px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-top: 16px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+  }
+  .legend-line {
+    width: 20px;
+    height: 3px;
+    border-radius: 2px;
+  }
+
+  /* FK Relationship lines visual */
+  .fk-map {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .fk-rel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 5px 8px;
+    background: rgba(255,255,255,.025);
+    border-left: 2px solid;
+  }
+  .fk-rel .parent { color: var(--accent); font-weight: 700; }
+  .fk-rel .arrow  { color: var(--muted); }
+  .fk-rel .child  { color: var(--accent4); }
+  .fk-rel .col    { color: var(--muted); font-size: 9px; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="eyebrow">// VENT AFRICA · INFRA · MIGRATION STRATEGY</div>
+      <h1>Table-by-Table<br><span>Migration Architecture</span></h1>
+    </div>
+    <div class="header-right">
+      <span class="badge badge-blue">20GB+ Dataset</span>
+      <span class="badge badge-orange">FK-Safe</span>
+      <span class="badge badge-green">Batch Verified</span>
+      <span class="badge badge-purple">Rollback-Ready</span>
+    </div>
+  </div>
+
+  <!-- PHASES -->
+  <div class="section-label"><span>Migration Phases</span></div>
+  <div class="phases">
+    <div class="phase">
+      <div class="phase-num">01</div>
+      <div class="phase-title">Pre-Flight & Schema Sync</div>
+      <div class="phase-sub">DDL diff · FK map · checksums</div>
+    </div>
+    <div class="phase">
+      <div class="phase-num">02</div>
+      <div class="phase-title">Disable FK Constraints</div>
+      <div class="phase-sub">SET foreign_key_checks=0 · lock plan</div>
+    </div>
+    <div class="phase">
+      <div class="phase-num">03</div>
+      <div class="phase-title">Table-by-Table Import</div>
+      <div class="phase-sub">Ordered queue · chunked batches</div>
+    </div>
+    <div class="phase">
+      <div class="phase-num">04</div>
+      <div class="phase-title">Verify & Count-Check</div>
+      <div class="phase-sub">Row count · hash · FK integrity</div>
+    </div>
+    <div class="phase">
+      <div class="phase-num">05</div>
+      <div class="phase-title">Re-enable FK & Go-Live</div>
+      <div class="phase-sub">FK checks ON · cutover · monitor</div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="main-grid">
+
+    <!-- LEFT: TABLE QUEUE -->
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:var(--accent)"></span> Migration Queue</div>
+      <div class="table-queue">
+        <div class="tq-item t-root">
+          <span class="order">1</span>
+          <span class="name">users</span>
+          <span class="size">ROOT</span>
+        </div>
+        <div class="tq-item t-dep">
+          <span class="order">2</span>
+          <span class="name">kycs</span>
+          <span class="dep-icon">↳</span>
+          <span class="size">DEP</span>
+        </div>
+        <div class="tq-item t-dep">
+          <span class="order">3</span>
+          <span class="name">wallet_addresses</span>
+          <span class="dep-icon">↳</span>
+          <span class="size">DEP</span>
+        </div>
+        <div class="tq-item t-dep">
+          <span class="order">4</span>
+          <span class="name">beneficiaries</span>
+          <span class="dep-icon">↳</span>
+          <span class="size">DEP</span>
+        </div>
+        <div class="tq-item t-child">
+          <span class="order">5</span>
+          <span class="name">transactions</span>
+          <span class="dep-icon">↳↳</span>
+          <span class="size">CHILD</span>
+        </div>
+        <div class="tq-item t-child">
+          <span class="order">6</span>
+          <span class="name">settlements</span>
+          <span class="dep-icon">↳↳</span>
+          <span class="size">CHILD</span>
+        </div>
+        <div class="tq-item t-child">
+          <span class="order">7</span>
+          <span class="name">remittances</span>
+          <span class="dep-icon">↳↳</span>
+          <span class="size">CHILD</span>
+        </div>
+        <div class="tq-item t-audit">
+          <span class="order">8</span>
+          <span class="name">user_status_histories</span>
+          <span class="dep-icon">↳</span>
+          <span class="size">AUDIT</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 16px;">
+        <div class="fk-block">
+          <div class="fk-title">FK Guard</div>
+          <div class="code-line">
+            <span class="kw">SET</span>
+            <span class="val">foreign_key_checks</span>
+            <span class="cmt">= 0;</span>
+          </div>
+          <div class="code-line" style="color:var(--muted); font-size:10px; padding-left:4px;">-- before each job run</div>
+          <div style="margin-top:8px;" class="code-line">
+            <span class="kw">SET</span>
+            <span class="val">foreign_key_checks</span>
+            <span class="cmt">= 1;</span>
+          </div>
+          <div class="code-line" style="color:var(--muted); font-size:10px; padding-left:4px;">-- after verification passes</div>
+        </div>
+      </div>
+
+      <!-- FK Relationships -->
+      <div class="panel-title" style="margin-top:14px;"><span class="dot" style="background:var(--accent4)"></span> FK Map</div>
+      <div class="fk-map">
+        <div class="fk-rel" style="border-left-color:var(--accent);">
+          <span class="parent">users</span><span class="arrow">──▶</span><span class="child">kycs</span><span class="col">user_id</span>
+        </div>
+        <div class="fk-rel" style="border-left-color:var(--accent);">
+          <span class="parent">users</span><span class="arrow">──▶</span><span class="child">wallet_addresses</span><span class="col">user_id</span>
+        </div>
+        <div class="fk-rel" style="border-left-color:var(--accent);">
+          <span class="parent">users</span><span class="arrow">──▶</span><span class="child">beneficiaries</span><span class="col">user_id</span>
+        </div>
+        <div class="fk-rel" style="border-left-color:var(--accent4);">
+          <span class="parent">users</span><span class="arrow">──▶</span><span class="child">transactions</span><span class="col">user_id</span>
+        </div>
+        <div class="fk-rel" style="border-left-color:var(--accent2);">
+          <span class="parent">transactions</span><span class="arrow">──▶</span><span class="child">settlements</span><span class="col">txn_id</span>
+        </div>
+        <div class="fk-rel" style="border-left-color:var(--accent2);">
+          <span class="parent">transactions</span><span class="arrow">──▶</span><span class="child">remittances</span><span class="col">txn_id</span>
+        </div>
+        <div class="fk-rel" style="border-left-color:var(--muted);">
+          <span class="parent">users</span><span class="arrow">──▶</span><span class="child">user_status_histories</span><span class="col">user_id</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: PIPELINE -->
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:var(--accent2)"></span> Per-Table Job Pipeline</div>
+      <div class="pipeline">
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(0,212,255,.12);color:var(--accent);border:1px solid rgba(0,212,255,.3);">1</div>
+          <div class="step-content">
+            <div class="step-title">Resolve Table from Queue</div>
+            <div class="step-desc">Dispatch MigrationJob with table_name + batch_size config<br>Job reads next pending table from migration_queue ledger</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--accent);color:var(--accent);">DISPATCH</span>
+        </div>
+
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(199,125,255,.12);color:var(--accent4);border:1px solid rgba(199,125,255,.3);">2</div>
+          <div class="step-content">
+            <div class="step-title">Count Source Records</div>
+            <div class="step-desc">SELECT COUNT(*) on source DB for this table<br>Store expected_count in migration_checkpoints table<br>Calculate total batches = CEIL(count / batch_size)</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--accent4);color:var(--accent4);">AUDIT</span>
+        </div>
+
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(255,107,53,.12);color:var(--accent2);border:1px solid rgba(255,107,53,.3);">3</div>
+          <div class="step-content">
+            <div class="step-title">Disable FK Checks · Begin Batch Loop</div>
+            <div class="step-desc">SET foreign_key_checks = 0 on target connection<br>Loop: OFFSET = batch_num × batch_size<br>SELECT * FROM source LIMIT {size} OFFSET {offset}</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--accent2);color:var(--accent2);">IMPORT</span>
+        </div>
+
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(255,107,53,.12);color:var(--accent2);border:1px solid rgba(255,107,53,.3);">4</div>
+          <div class="step-content">
+            <div class="step-title">INSERT with Conflict Handling</div>
+            <div class="step-desc">INSERT INTO target ... ON DUPLICATE KEY IGNORE<br>Log each batch result: rows_inserted, rows_skipped, errors<br>Update migration_checkpoints: last_batch_id + status</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--accent2);color:var(--accent2);">IMPORT</span>
+        </div>
+
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(127,255,110,.1);color:var(--accent3);border:1px solid rgba(127,255,110,.3);">5</div>
+          <div class="step-content">
+            <div class="step-title">Per-Batch Verification</div>
+            <div class="step-desc">After each batch: COUNT check src vs target for that ID range<br>Hash spot-check: MD5(GROUP_CONCAT) on 5 random rows<br>FAIL FAST: if mismatch → re-queue batch, alert, do NOT advance</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--accent3);color:var(--accent3);">VERIFY</span>
+        </div>
+
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(127,255,110,.1);color:var(--accent3);border:1px solid rgba(127,255,110,.3);">6</div>
+          <div class="step-content">
+            <div class="step-title">Final Table Count Reconciliation</div>
+            <div class="step-desc">After all batches: total_imported vs expected_count<br>Run SELECT COUNT(*) on both DBs and assert equality<br>Log migration_checkpoints.status = 'verified'</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--accent3);color:var(--accent3);">VERIFY</span>
+        </div>
+
+        <div class="pipe-step">
+          <div class="step-num" style="background:rgba(255,209,102,.08);color:var(--warn);border:1px solid rgba(255,209,102,.3);">7</div>
+          <div class="step-content">
+            <div class="step-title">Re-enable FK · Mark Table Done · Next Table</div>
+            <div class="step-desc">SET foreign_key_checks = 1 · validate FK integrity<br>Mark table complete in migration_queue ledger<br>Dispatch next pending table job or signal completion</div>
+          </div>
+          <span class="step-tag" style="border-color:var(--warn);color:var(--warn);">COMPLETE</span>
+        </div>
+      </div>
+
+      <!-- Metrics -->
+      <div class="divider-row" style="margin-top:20px;"></div>
+      <div class="metrics">
+        <div class="metric-card">
+          <div class="metric-val" style="color:var(--accent);">8</div>
+          <div class="metric-lbl">Tables</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" style="color:var(--accent4);">5K</div>
+          <div class="metric-lbl">Batch Size</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" style="color:var(--accent2);">3×</div>
+          <div class="metric-lbl">Retry Cap</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-val" style="color:var(--accent3);">100%</div>
+          <div class="metric-lbl">Count Match</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: VERIFICATION + ROLLBACK -->
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent3)"></span> Verification Checks</div>
+        <div class="verify-grid">
+          <div class="verify-check">
+            <span class="icon">🔢</span>
+            <div>
+              <div class="vc-title">Row Count Assert</div>
+              <div class="vc-desc">COUNT(*) source == COUNT(*) target for each table after full import</div>
+            </div>
+            <span class="vc-badge">HARD GATE</span>
+          </div>
+          <div class="verify-check">
+            <span class="icon">🔑</span>
+            <div>
+              <div class="vc-title">PK Completeness</div>
+              <div class="vc-desc">All primary key IDs present in target — no gaps in ID range</div>
+            </div>
+            <span class="vc-badge">ID DIFF</span>
+          </div>
+          <div class="verify-check">
+            <span class="icon">🧮</span>
+            <div>
+              <div class="vc-title">Hash Spot Check</div>
+              <div class="vc-desc">MD5 checksum on sampled rows per batch to catch data corruption</div>
+            </div>
+            <span class="vc-badge">SAMPLE</span>
+          </div>
+          <div class="verify-check">
+            <span class="icon">🔗</span>
+            <div>
+              <div class="vc-title">FK Integrity Scan</div>
+              <div class="vc-desc">After re-enabling FK checks: assert no orphaned child records exist</div>
+            </div>
+            <span class="vc-badge">POST-IMPORT</span>
+          </div>
+          <div class="verify-check">
+            <span class="icon">📋</span>
+            <div>
+              <div class="vc-title">Checkpoint Ledger</div>
+              <div class="vc-desc">migration_checkpoints table logs every batch: id, table, status, count, hash, ts</div>
+            </div>
+            <span class="vc-badge">AUDIT LOG</span>
+          </div>
+          <div class="verify-check">
+            <span class="icon">📊</span>
+            <div>
+              <div class="vc-title">Financial Aggregates</div>
+              <div class="vc-desc">SUM(amount) on transactions & remittances must match source totals</div>
+            </div>
+            <span class="vc-badge">FINTECH</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--danger)"></span> Rollback Protocol</div>
+        <div class="rollback-steps">
+          <div class="rb-step">
+            <span class="rb-icon">🛑</span>
+            <div class="rb-text">
+              <div class="rb-title">Batch Failure → Re-queue</div>
+              <div class="rb-desc">Retry same batch up to 3×. Log fail reason. Do NOT advance offset.</div>
+            </div>
+          </div>
+          <div class="rb-step">
+            <span class="rb-icon">🔄</span>
+            <div class="rb-text">
+              <div class="rb-title">Table Failure → Truncate & Restart</div>
+              <div class="rb-desc">TRUNCATE target table. Reset checkpoint. Re-run full table job.</div>
+            </div>
+          </div>
+          <div class="rb-step">
+            <span class="rb-icon">⛔</span>
+            <div class="rb-text">
+              <div class="rb-title">Critical Failure → Stop Chain</div>
+              <div class="rb-desc">Halt all subsequent table jobs. Alert team. FK remains OFF. Source DB untouched — zero destructive ops run on source.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM GRID -->
+  <div class="section-label"><span>Batch Progress Simulation</span></div>
+  <div class="bottom-grid">
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:var(--accent)"></span> Live Batch Status</div>
+      <div class="batch-visual">
+        <div class="batch-row">
+          <span class="batch-label">users</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-done">✓</div><div class="batch-block b-done">✓</div>
+            <div class="batch-block b-done">✓</div><div class="batch-block b-done">✓</div>
+            <div class="batch-block b-done">✓</div><div class="batch-block b-done">✓</div>
+          </div>
+          <span class="batch-stat" style="color:var(--accent3);">6/6 ✓</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">kycs</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-done">✓</div><div class="batch-block b-done">✓</div>
+            <div class="batch-block b-done">✓</div><div class="batch-block b-prog">▶</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat" style="color:var(--accent);">3/6</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">wallet_addr</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat">0/6</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">beneficiar.</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat">0/6</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">transactions</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat">0/6</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">settlements</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-fail">✗</div>
+            <div class="batch-block b-skip">↺</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat" style="color:var(--warn);">QUEUED</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">remittances</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat">0/6</span>
+        </div>
+        <div class="batch-row">
+          <span class="batch-label">usr_status</span>
+          <div class="batch-blocks">
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+            <div class="batch-block b-wait">·</div><div class="batch-block b-wait">·</div>
+          </div>
+          <span class="batch-stat">0/6</span>
+        </div>
+      </div>
+
+      <div class="legend" style="margin-top:14px; padding:10px 14px;">
+        <div class="legend-item"><div class="legend-line" style="background:rgba(127,255,110,.4);"></div> Done</div>
+        <div class="legend-item"><div class="legend-line" style="background:var(--accent);"></div> In Progress</div>
+        <div class="legend-item"><div class="legend-line" style="background:var(--border);"></div> Waiting</div>
+        <div class="legend-item"><div class="legend-line" style="background:rgba(255,77,77,.4);"></div> Failed</div>
+        <div class="legend-item"><div class="legend-line" style="background:rgba(255,209,102,.3);"></div> Retrying</div>
+      </div>
+    </div>
+
+    <!-- CHECKPOINT SCHEMA -->
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:var(--accent4)"></span> migration_checkpoints Schema</div>
+      <div style="font-family:'JetBrains Mono',monospace; font-size:11px; line-height:2; background:rgba(0,0,0,.3); padding:16px; border:1px solid var(--border); border-radius:2px;">
+        <div style="color:var(--accent);">CREATE TABLE <span style="color:var(--text);">migration_checkpoints</span> (</div>
+        <div style="padding-left:16px; color:var(--muted);">id           BIGINT AUTO_INCREMENT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent3);">table_name</span>   VARCHAR(100),</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent3);">batch_number</span> INT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent3);">offset_start</span> BIGINT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent3);">offset_end</span>   BIGINT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent2);">rows_expected</span> BIGINT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent2);">rows_imported</span> BIGINT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--accent2);">rows_skipped</span>  BIGINT,</div>
+        <div style="padding-left:16px;"><span style="color:var(--warn);">checksum_hash</span> VARCHAR(64),</div>
+        <div style="padding-left:16px;"><span style="color:var(--warn);">status</span>        ENUM('pending','running','verified','failed'),</div>
+        <div style="padding-left:16px;"><span style="color:var(--muted);">retries</span>       TINYINT DEFAULT 0,</div>
+        <div style="padding-left:16px;"><span style="color:var(--muted);">error_message</span> TEXT,</div>
+        <div style="padding-left:16px; color:var(--muted);">created_at   TIMESTAMP,</div>
+        <div style="padding-left:16px; color:var(--muted);">completed_at TIMESTAMP NULL,</div>
+        <div style="color:var(--accent);">);</div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div class="panel-title" style="margin-bottom:10px;"><span class="dot" style="background:var(--accent2)"></span> migration_queue Schema</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:11px; line-height:2; background:rgba(0,0,0,.3); padding:16px; border:1px solid var(--border); border-radius:2px;">
+          <div style="color:var(--accent);">CREATE TABLE <span style="color:var(--text);">migration_queue</span> (</div>
+          <div style="padding-left:16px; color:var(--muted);">id            BIGINT AUTO_INCREMENT,</div>
+          <div style="padding-left:16px;"><span style="color:var(--accent3);">table_name</span>    VARCHAR(100) UNIQUE,</div>
+          <div style="padding-left:16px;"><span style="color:var(--accent3);">priority</span>      INT,  <span style="color:var(--muted);">-- 1=first</span></div>
+          <div style="padding-left:16px;"><span style="color:var(--accent2);">source_count</span>  BIGINT,</div>
+          <div style="padding-left:16px;"><span style="color:var(--accent2);">target_count</span>  BIGINT DEFAULT 0,</div>
+          <div style="padding-left:16px;"><span style="color:var(--warn);">status</span>        ENUM('pending','in_progress','done','failed'),</div>
+          <div style="padding-left:16px; color:var(--muted);">started_at    TIMESTAMP NULL,</div>
+          <div style="padding-left:16px; color:var(--muted);">completed_at  TIMESTAMP NULL,</div>
+          <div style="color:var(--accent);">);</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KEY RULES -->
+    <div class="panel">
+      <div class="panel-title"><span class="dot" style="background:var(--warn)"></span> Engineering Rules</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+
+        <div style="padding:10px 12px; background:rgba(0,212,255,.05); border:1px solid rgba(0,212,255,.2); border-radius:2px;">
+          <div style="font-size:11px; font-weight:700; color:var(--accent); margin-bottom:4px;">📌 Order is Everything</div>
+          <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;">Always migrate parent tables before child tables. users must exist before transactions. transactions before settlements.</div>
+        </div>
+
+        <div style="padding:10px 12px; background:rgba(255,107,53,.05); border:1px solid rgba(255,107,53,.2); border-radius:2px;">
+          <div style="font-size:11px; font-weight:700; color:var(--accent2); margin-bottom:4px;">⚡ FK OFF = Speed</div>
+          <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;">Disabling FK checks on target DB connection dramatically speeds up bulk INSERT. MySQL skips constraint validation on every row.</div>
+        </div>
+
+        <div style="padding:10px 12px; background:rgba(127,255,110,.04); border:1px solid rgba(127,255,110,.2); border-radius:2px;">
+          <div style="font-size:11px; font-weight:700; color:var(--accent3); margin-bottom:4px;">🔒 Source is Read-Only</div>
+          <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;">NEVER write or delete from source DB during migration. Use separate DB connections: $sourceDB (read-only) and $targetDB.</div>
+        </div>
+
+        <div style="padding:10px 12px; background:rgba(199,125,255,.05); border:1px solid rgba(199,125,255,.2); border-radius:2px;">
+          <div style="font-size:11px; font-weight:700; color:var(--accent4); margin-bottom:4px;">♻️ Idempotent Jobs</div>
+          <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;">Use INSERT IGNORE or ON DUPLICATE KEY. Job can safely re-run from last checkpoint without creating duplicates.</div>
+        </div>
+
+        <div style="padding:10px 12px; background:rgba(255,209,102,.05); border:1px solid rgba(255,209,102,.2); border-radius:2px;">
+          <div style="font-size:11px; font-weight:700; color:var(--warn); margin-bottom:4px;">🎯 Count = Ground Truth</div>
+          <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;">Row count is the single most important verification gate. A count mismatch must BLOCK the next table from starting.</div>
+        </div>
+
+        <div style="padding:10px 12px; background:rgba(255,77,77,.05); border:1px solid rgba(255,77,77,.2); border-radius:2px;">
+          <div style="font-size:11px; font-weight:700; color:var(--danger); margin-bottom:4px;">💰 Financial Integrity Extra</div>
+          <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;">For transactions, remittances, settlements: assert SUM(amount) matches source. Count alone isn't enough for money tables.</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2: SCHEMA-DIVERGENT MIGRATION STRATEGIES              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <div style="margin-top:56px; border-top:2px solid var(--accent2); padding-top:40px;">
+    <div class="section-label"><span>Schema-Divergent Migration — Top Grade Strategies</span></div>
+
+    <!-- INTRO CALLOUT -->
+    <div style="background:rgba(255,107,53,.06); border:1px solid rgba(255,107,53,.25); border-left:4px solid var(--accent2); padding:16px 20px; margin-bottom:32px; display:grid; grid-template-columns:auto 1fr; gap:16px; align-items:center;">
+      <div style="font-size:28px;">⚠️</div>
+      <div>
+        <div style="font-size:13px; font-weight:700; color:var(--accent2); margin-bottom:4px;">When Source &amp; Target Schemas Differ</div>
+        <div style="font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.7;">
+          You cannot do a direct SELECT→INSERT when column names, data types, table structures, or even table names have changed between databases.
+          Every column must be explicitly mapped, every transformation must be declarative, and every transformation must be testable in isolation before the full migration runs.
+          The strategies below address this systematically.
+        </div>
+      </div>
+    </div>
+
+    <!-- THE 6 DIVERGENCE TYPES -->
+    <div class="section-label"><span>Types of Schema Divergence You May Encounter</span></div>
+    <div style="display:grid; grid-template-columns:repeat(6,1fr); gap:2px; margin-bottom:32px;">
+      <div style="background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--accent); padding:14px 12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent); letter-spacing:2px; margin-bottom:6px;">TYPE A</div>
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Column Rename</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent2);">full_name</span> → <span style="color:var(--accent3);">display_name</span><br><span style="color:var(--accent2);">mobile</span> → <span style="color:var(--accent3);">phone_number</span></div>
+      </div>
+      <div style="background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--accent4); padding:14px 12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent4); letter-spacing:2px; margin-bottom:6px;">TYPE B</div>
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Type Change</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent2);">amount INT</span> → <span style="color:var(--accent3);">DECIMAL(20,8)</span><br><span style="color:var(--accent2);">status TINYINT</span> → <span style="color:var(--accent3);">ENUM</span></div>
+      </div>
+      <div style="background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--accent2); padding:14px 12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent2); letter-spacing:2px; margin-bottom:6px;">TYPE C</div>
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Column Split</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent2);">full_name</span> → <span style="color:var(--accent3);">first_name</span> + <span style="color:var(--accent3);">last_name</span><br><span style="color:var(--accent2);">address</span> → city + state + zip</div>
+      </div>
+      <div style="background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--accent3); padding:14px 12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent3); letter-spacing:2px; margin-bottom:6px;">TYPE D</div>
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Column Merge</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent2);">dial_code</span> + <span style="color:var(--accent2);">number</span> → <span style="color:var(--accent3);">phone_e164</span><br>Merge logic required</div>
+      </div>
+      <div style="background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--warn); padding:14px 12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--warn); letter-spacing:2px; margin-bottom:6px;">TYPE E</div>
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Table Split</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent2);">users</span> → <span style="color:var(--accent3);">users</span> + <span style="color:var(--accent3);">user_profiles</span><br>One source, two targets</div>
+      </div>
+      <div style="background:var(--surface); border:1px solid var(--border); border-top:3px solid var(--danger); padding:14px 12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--danger); letter-spacing:2px; margin-bottom:6px;">TYPE F</div>
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Value Transform</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent2);">status=1</span> → <span style="color:var(--accent3);">'active'</span><br>Currency: kobo → naira ÷ 100</div>
+      </div>
+    </div>
+
+    <!-- STRATEGY 1: ETL TRANSFORMER LAYER -->
+    <div class="section-label"><span>Strategy 1 — Declarative ETL Transformer Layer</span></div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:32px;">
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent)"></span> How It Works</div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de; margin-bottom:14px;">
+          Instead of writing raw SQL for each table, you define a <strong style="color:var(--accent);">ColumnMap</strong> per table that declares exactly how each source column maps to the target. The migration job reads this map and builds the SELECT and INSERT dynamically. No hardcoded SQL. Every transformation is testable in isolation.
+        </div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de;">
+          The transformer runs <strong style="color:var(--accent3);">before INSERT</strong> — it takes a raw source row array and returns a transformed target row array. This means you can unit test every single mapping with a simple array-in, array-out test.
+        </div>
+        <div style="margin-top:14px; padding:10px 14px; background:rgba(0,212,255,.05); border:1px solid rgba(0,212,255,.2);">
+          <div style="font-size:11px; font-weight:700; color:var(--accent); margin-bottom:4px;">✅ Best For</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;">
+            Column renames · Type casts · Value lookups · Null defaults · Simple derivations
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="background:rgba(0,0,0,.4);">
+        <div class="panel-title"><span class="dot" style="background:var(--accent3)"></span> ColumnMap Definition (PHP/Laravel)</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; line-height:1.8; overflow-x:auto;">
+          <div style="color:var(--muted);">// config/migration_maps/users.php</div>
+          <div style="color:var(--accent3);">'column_map' <span style="color:var(--text);">=> [</span></div>
+          <div style="padding-left:16px; color:var(--text);">'id'          <span style="color:var(--muted);">=></span> <span style="color:var(--accent);">'id'</span><span style="color:var(--muted);">,  // direct</span></div>
+          <div style="padding-left:16px; color:var(--text);">'full_name'   <span style="color:var(--muted);">=></span> <span style="color:var(--accent);">'display_name'</span><span style="color:var(--muted);">, // rename</span></div>
+          <div style="padding-left:16px; color:var(--text);">'mobile'      <span style="color:var(--muted);">=></span> <span style="color:var(--accent);">'phone_number'</span><span style="color:var(--muted);">, // rename</span></div>
+          <div style="padding-left:16px; color:var(--text);">'dob'         <span style="color:var(--muted);">=></span> <span style="color:var(--accent);">null</span><span style="color:var(--muted);">,   // DROP - not in new schema</span></div>
+          <div style="color:var(--accent3);">]<span style="color:var(--text);">,</span></div>
+
+          <div style="margin-top:8px; color:var(--accent3);">'transforms' <span style="color:var(--text);">=> [</span></div>
+          <div style="padding-left:16px; color:var(--accent);">'status' <span style="color:var(--text);">=> <span style="color:var(--accent4);">fn</span>($v) => match((int)$v) {</span></div>
+          <div style="padding-left:32px; color:var(--text);">1 => <span style="color:var(--accent3);">'active'</span>,</div>
+          <div style="padding-left:32px; color:var(--text);">0 => <span style="color:var(--accent3);">'inactive'</span>,</div>
+          <div style="padding-left:32px; color:var(--text);">2 => <span style="color:var(--accent3);">'suspended'</span>,</div>
+          <div style="padding-left:32px; color:var(--text);">default => <span style="color:var(--accent3);">'inactive'</span></div>
+          <div style="padding-left:16px; color:var(--text);">},</div>
+          <div style="padding-left:16px; color:var(--accent);">'amount' <span style="color:var(--text);">=> <span style="color:var(--accent4);">fn</span>($v) => bcdiv($v, '100', 8),</span></div>
+          <div style="padding-left:16px; color:var(--muted);">// kobo → naira with 8 decimal precision</div>
+          <div style="color:var(--accent3);">]<span style="color:var(--text);">,</span></div>
+
+          <div style="margin-top:8px; color:var(--accent3);">'computed' <span style="color:var(--text);">=> [</span></div>
+          <div style="padding-left:16px; color:var(--accent);">'phone_e164' <span style="color:var(--text);">=> <span style="color:var(--accent4);">fn</span>($row) =></span></div>
+          <div style="padding-left:32px; color:var(--text);">'+' . ltrim($row['dial_code'], '+') . $row['number'],</div>
+          <div style="padding-left:16px; color:var(--muted);">// merge two source cols → one target col</div>
+          <div style="color:var(--accent3);">]</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STRATEGY 2: SCHEMA DIFF AUDIT -->
+    <div class="section-label"><span>Strategy 2 — Pre-Migration Schema Diff Audit</span></div>
+    <div style="display:grid; grid-template-columns:1fr 80px 1fr; gap:0; margin-bottom:32px; border:1px solid var(--border);">
+      <!-- SOURCE SCHEMA -->
+      <div class="panel" style="border:none; border-right:1px solid var(--border);">
+        <div class="panel-title"><span class="dot" style="background:var(--accent2)"></span> Source DB — transactions (OLD)</div>
+        <div style="display:flex; flex-direction:column; gap:3px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,255,255,.03); border:1px solid var(--border);">
+            <span>id</span><span style="color:var(--muted);">BIGINT</span><span style="font-size:8px; color:var(--accent3); border:1px solid rgba(127,255,110,.3); padding:1px 5px;">PK</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.2);">
+            <span style="color:var(--accent2);">user_id</span><span style="color:var(--muted);">INT</span><span style="font-size:8px; color:var(--warn); border:1px solid rgba(255,209,102,.3); padding:1px 5px;">→ RENAME</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(199,125,255,.07); border:1px solid rgba(199,125,255,.2);">
+            <span style="color:var(--accent4);">amount</span><span style="color:var(--muted);">INT</span><span style="font-size:8px; color:var(--accent4); border:1px solid rgba(199,125,255,.3); padding:1px 5px;">TYPE↑</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(199,125,255,.07); border:1px solid rgba(199,125,255,.2);">
+            <span style="color:var(--accent4);">currency</span><span style="color:var(--muted);">VARCHAR(3)</span><span style="font-size:8px; color:var(--accent4); border:1px solid rgba(199,125,255,.3); padding:1px 5px;">TYPE↑</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.2);">
+            <span style="color:var(--accent2);">txn_ref</span><span style="color:var(--muted);">VARCHAR(50)</span><span style="font-size:8px; color:var(--warn); border:1px solid rgba(255,209,102,.3); padding:1px 5px;">→ RENAME</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.2);">
+            <span style="color:var(--accent2);">status</span><span style="color:var(--muted);">TINYINT</span><span style="font-size:8px; color:var(--warn); border:1px solid rgba(255,209,102,.3); padding:1px 5px;">VAL MAP</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,77,77,.07); border:1px solid rgba(255,77,77,.2);">
+            <span style="color:var(--danger); text-decoration:line-through;">narration</span><span style="color:var(--muted); text-decoration:line-through;">TEXT</span><span style="font-size:8px; color:var(--danger); border:1px solid rgba(255,77,77,.3); padding:1px 5px;">DROP</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,77,77,.07); border:1px solid rgba(255,77,77,.2);">
+            <span style="color:var(--danger); text-decoration:line-through;">old_system_id</span><span style="color:var(--muted); text-decoration:line-through;">INT</span><span style="font-size:8px; color:var(--danger); border:1px solid rgba(255,77,77,.3); padding:1px 5px;">DROP</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,255,255,.03); border:1px solid var(--border);">
+            <span>created_at</span><span style="color:var(--muted);">TIMESTAMP</span><span style="font-size:8px; color:var(--accent3); border:1px solid rgba(127,255,110,.3); padding:1px 5px;">DIRECT</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ARROW COLUMN -->
+      <div style="background:var(--surface); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:16px 0;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:20px; color:var(--accent);">→</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:8px; color:var(--muted); writing-mode:vertical-rl; letter-spacing:2px; transform:rotate(180deg);">TRANSFORMER</div>
+      </div>
+
+      <!-- TARGET SCHEMA -->
+      <div class="panel" style="border:none; border-left:1px solid var(--border);">
+        <div class="panel-title"><span class="dot" style="background:var(--accent3)"></span> Target DB — transactions (NEW)</div>
+        <div style="display:flex; flex-direction:column; gap:3px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,255,255,.03); border:1px solid var(--border);">
+            <span>id</span><span style="color:var(--muted);">BIGINT</span><span style="font-size:8px; color:var(--accent3); border:1px solid rgba(127,255,110,.3); padding:1px 5px;">PK</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.2);">
+            <span style="color:var(--accent3);">sender_id</span><span style="color:var(--muted);">BIGINT</span><span style="font-size:8px; color:var(--warn); border:1px solid rgba(255,209,102,.3); padding:1px 5px;">← user_id</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(199,125,255,.07); border:1px solid rgba(199,125,255,.2);">
+            <span style="color:var(--accent3);">amount</span><span style="color:var(--muted);">DECIMAL(20,8)</span><span style="font-size:8px; color:var(--accent4); border:1px solid rgba(199,125,255,.3); padding:1px 5px;">CAST</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(199,125,255,.07); border:1px solid rgba(199,125,255,.2);">
+            <span style="color:var(--accent3);">currency_code</span><span style="color:var(--muted);">CHAR(3)</span><span style="font-size:8px; color:var(--accent4); border:1px solid rgba(199,125,255,.3); padding:1px 5px;">UPPER()</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.2);">
+            <span style="color:var(--accent3);">reference</span><span style="color:var(--muted);">VARCHAR(100)</span><span style="font-size:8px; color:var(--warn); border:1px solid rgba(255,209,102,.3); padding:1px 5px;">← txn_ref</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,107,53,.07); border:1px solid rgba(255,107,53,.2);">
+            <span style="color:var(--accent3);">status</span><span style="color:var(--muted);">ENUM</span><span style="font-size:8px; color:var(--warn); border:1px solid rgba(255,209,102,.3); padding:1px 5px;">← 1='active'</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(127,255,110,.07); border:1px solid rgba(127,255,110,.2);">
+            <span style="color:var(--accent3);">migrated_from</span><span style="color:var(--muted);">VARCHAR(50)</span><span style="font-size:8px; color:var(--accent3); border:1px solid rgba(127,255,110,.3); padding:1px 5px;">NEW</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(127,255,110,.07); border:1px solid rgba(127,255,110,.2);">
+            <span style="color:var(--accent3);">migrated_at</span><span style="color:var(--muted);">TIMESTAMP</span><span style="font-size:8px; color:var(--accent3); border:1px solid rgba(127,255,110,.3); padding:1px 5px;">NEW</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:8px; padding:5px 8px; background:rgba(255,255,255,.03); border:1px solid var(--border);">
+            <span>created_at</span><span style="color:var(--muted);">TIMESTAMP</span><span style="font-size:8px; color:var(--accent3); border:1px solid rgba(127,255,110,.3); padding:1px 5px;">DIRECT</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STRATEGY 3–6 GRID -->
+    <div class="section-label"><span>Advanced Strategies for Structural Divergence</span></div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:32px;">
+
+      <!-- STRATEGY 3: STAGING TABLE -->
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent4)"></span> Strategy 3 — Staging Table Buffer</div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de; margin-bottom:14px;">
+          Never write directly to your final production table. First import raw source data into a <strong style="color:var(--accent4);">staging table</strong> (<code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px;">_stg_transactions</code>) that mirrors the source schema exactly. Then run a separate SQL transformation job from staging → final table. This separates the problem of "getting data across" from "getting data right."
+        </div>
+        <div style="background:rgba(0,0,0,.35); padding:12px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; border:1px solid var(--border); line-height:1.9; margin-bottom:12px;">
+          <div style="color:var(--muted);">-- Step 1: fast raw import into staging</div>
+          <div><span style="color:var(--accent);">INSERT INTO</span> <span style="color:var(--accent4);">_stg_transactions</span></div>
+          <div style="padding-left:12px;"><span style="color:var(--accent);">SELECT</span> * <span style="color:var(--accent);">FROM</span> <span style="color:var(--accent2);">source.transactions</span>;</div>
+          <div style="margin-top:6px; color:var(--muted);">-- Step 2: transform staging → final</div>
+          <div><span style="color:var(--accent);">INSERT INTO</span> <span style="color:var(--accent3);">transactions</span></div>
+          <div style="padding-left:12px;"><span style="color:var(--accent);">SELECT</span></div>
+          <div style="padding-left:24px;">id, user_id <span style="color:var(--accent);">AS</span> sender_id,</div>
+          <div style="padding-left:24px;">amount / 100 <span style="color:var(--accent);">AS</span> amount,</div>
+          <div style="padding-left:24px;"><span style="color:var(--accent);">UPPER</span>(currency) <span style="color:var(--accent);">AS</span> currency_code,</div>
+          <div style="padding-left:24px;"><span style="color:var(--accent);">CASE</span> status <span style="color:var(--accent);">WHEN</span> 1 <span style="color:var(--accent);">THEN</span> <span style="color:var(--accent3);">'active'</span> <span style="color:var(--accent);">END</span>,</div>
+          <div style="padding-left:24px;"><span style="color:var(--accent4);">'legacy_db'</span>, <span style="color:var(--accent);">NOW</span>() <span style="color:var(--muted);">-- migrated_from/at</span></div>
+          <div style="padding-left:12px;"><span style="color:var(--accent);">FROM</span> _stg_transactions;</div>
+        </div>
+        <div style="padding:8px 12px; background:rgba(199,125,255,.06); border:1px solid rgba(199,125,255,.2);">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;">
+            <span style="color:var(--accent4);">✅ Advantage:</span> You can re-run the transform step unlimited times without re-pulling data from source. Fix a bad transform? Just truncate final and re-transform from staging. Fast iteration.
+          </div>
+        </div>
+      </div>
+
+      <!-- STRATEGY 4: TABLE SPLIT HANDLER -->
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent2)"></span> Strategy 4 — Table Split / Fanout Handler</div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de; margin-bottom:14px;">
+          When one source table feeds <strong style="color:var(--accent2);">multiple target tables</strong> (e.g., old <code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px;">users</code> table splits into <code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px;">users</code> + <code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px;">user_profiles</code> + <code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px;">user_kyc_meta</code>), your batch job must fan out a single source row into multiple target inserts — wrapped in a single DB transaction.
+        </div>
+
+        <!-- Fan-out visual -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+          <div style="background:rgba(255,107,53,.1); border:1px solid rgba(255,107,53,.3); padding:10px 14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--accent2); text-align:center; flex-shrink:0;">
+            source<br>users<br><span style="font-size:9px; color:var(--muted);">1 row</span>
+          </div>
+          <div style="flex:1; display:flex; flex-direction:column; gap:4px; position:relative;">
+            <div style="position:absolute; left:0; top:50%; width:2px; height:100%; background:var(--border); transform:translateY(-50%);"></div>
+            <div style="display:flex; align-items:center; gap:6px; padding-left:14px;">
+              <div style="width:8px; height:1px; background:var(--accent3);"></div>
+              <div style="background:rgba(127,255,110,.1); border:1px solid rgba(127,255,110,.25); padding:5px 10px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--accent3); flex:1;">users (core fields)</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; padding-left:14px;">
+              <div style="width:8px; height:1px; background:var(--accent);"></div>
+              <div style="background:rgba(0,212,255,.07); border:1px solid rgba(0,212,255,.2); padding:5px 10px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--accent); flex:1;">user_profiles (bio fields)</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; padding-left:14px;">
+              <div style="width:8px; height:1px; background:var(--accent4);"></div>
+              <div style="background:rgba(199,125,255,.07); border:1px solid rgba(199,125,255,.2); padding:5px 10px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--accent4); flex:1;">user_kyc_meta (kyc fields)</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:rgba(0,0,0,.35); padding:12px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; border:1px solid var(--border); line-height:1.9;">
+          <div style="color:var(--muted);">// In your batch transformer:</div>
+          <div><span style="color:var(--accent4);">DB::</span><span style="color:var(--accent);">transaction</span>(<span style="color:var(--accent4);">function</span>() <span style="color:var(--accent);">use</span> ($row) {</div>
+          <div style="padding-left:14px;"><span style="color:var(--accent3);">User::</span>upsert($this->mapCoreFields($row));</div>
+          <div style="padding-left:14px;"><span style="color:var(--accent3);">UserProfile::</span>upsert($this->mapProfileFields($row));</div>
+          <div style="padding-left:14px;"><span style="color:var(--accent3);">UserKycMeta::</span>upsert($this->mapKycFields($row));</div>
+          <div>}); <span style="color:var(--muted);">// atomic: all 3 succeed or all 3 rollback</span></div>
+        </div>
+      </div>
+
+      <!-- STRATEGY 5: DUAL-WRITE + SHADOW MODE -->
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent3)"></span> Strategy 5 — Shadow Mode / Dual-Write Cutover</div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de; margin-bottom:14px;">
+          For a 20GB live system, you <strong style="color:var(--accent3);">cannot afford downtime</strong>. The shadow mode pattern lets you migrate while production is still running. New writes go to <em>both</em> old and new DB simultaneously. The migration job only needs to catch up on historical data. Once caught up, flip the read pointer to the new DB and stop dual-write.
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
+          <div style="padding:10px 12px; background:rgba(0,212,255,.05); border:1px solid rgba(0,212,255,.2);">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent); margin-bottom:4px; letter-spacing:2px;">PHASE A — SYNC</div>
+            <div style="font-size:10px; color:var(--muted); line-height:1.6;">Migration job runs in background. App still reads+writes old DB only. No user impact.</div>
+          </div>
+          <div style="padding:10px 12px; background:rgba(127,255,110,.05); border:1px solid rgba(127,255,110,.2);">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent3); margin-bottom:4px; letter-spacing:2px;">PHASE B — DUAL</div>
+            <div style="font-size:10px; color:var(--muted); line-height:1.6;">Once historical data is synced, enable dual-write. New records go to both DBs simultaneously.</div>
+          </div>
+          <div style="padding:10px 12px; background:rgba(199,125,255,.05); border:1px solid rgba(199,125,255,.2);">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--accent4); margin-bottom:4px; letter-spacing:2px;">PHASE C — VERIFY</div>
+            <div style="font-size:10px; color:var(--muted); line-height:1.6;">Run full count + hash verification across all tables. SUM(amount) checks on financial tables.</div>
+          </div>
+          <div style="padding:10px 12px; background:rgba(255,209,102,.05); border:1px solid rgba(255,209,102,.2);">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--warn); margin-bottom:4px; letter-spacing:2px;">PHASE D — CUTOVER</div>
+            <div style="font-size:10px; color:var(--muted); line-height:1.6;">Point app reads to new DB. Stop old DB writes. Monitor. Rollback = flip pointer back.</div>
+          </div>
+        </div>
+        <div style="padding:8px 12px; background:rgba(127,255,110,.05); border:1px solid rgba(127,255,110,.2);">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted); line-height:1.6;"><span style="color:var(--accent3);">✅ Zero downtime.</span> Rollback is instant — just flip a feature flag. Works for 20GB+ datasets.</div>
+        </div>
+      </div>
+
+      <!-- STRATEGY 6: MIGRATION MANIFEST + DRY-RUN -->
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--warn)"></span> Strategy 6 — Migration Manifest &amp; Dry-Run Mode</div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de; margin-bottom:14px;">
+          Before running a single INSERT, generate a <strong style="color:var(--warn);">Migration Manifest</strong> — a report that shows exactly what will happen to every column of every table. Run the transformer on a sample of 1000 rows per table and output the before/after comparison. Sign off on this manifest before the real migration begins.
+        </div>
+        <div style="background:rgba(0,0,0,.35); padding:12px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; border:1px solid var(--border); line-height:1.9; margin-bottom:12px;">
+          <div style="color:var(--warn);">php artisan migrate:dry-run --table=transactions --limit=1000</div>
+          <div style="color:var(--muted); margin-top:6px;">// Output:</div>
+          <div style="color:var(--accent3);">✓ Column map: 7 direct, 3 renamed, 2 typed, 1 computed</div>
+          <div style="color:var(--accent2);">⚠  2 columns will be DROPPED (narration, old_system_id)</div>
+          <div style="color:var(--accent3);">✓ Sample 1000 rows: 0 transform errors</div>
+          <div style="color:var(--accent3);">✓ Decimal precision check: OK (8dp)</div>
+          <div style="color:var(--accent3);">✓ Enum mapping: all values accounted for</div>
+          <div style="color:var(--danger);">✗ 3 rows have NULL mobile — will map to NULL phone_number</div>
+          <div style="color:var(--muted); margin-top:4px;">→ Confirm manifest? [y/N]</div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div style="padding:8px 12px; background:rgba(255,209,102,.05); border:1px solid rgba(255,209,102,.2);">
+            <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;"><span style="color:var(--warn);">📋 Manifest</span> — stored in migration_manifests table. Every run references a manifest_id. Auditable.</div>
+          </div>
+          <div style="padding:8px 12px; background:rgba(127,255,110,.05); border:1px solid rgba(127,255,110,.2);">
+            <div style="font-size:10px; color:var(--muted); font-family:'JetBrains Mono',monospace; line-height:1.5;"><span style="color:var(--accent3);">🧪 Dry Run</span> — catch bad transforms BEFORE production. Zero cost to run 100 times. Run it on every schema change.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MIGRATED_FROM AUDIT TRAIL -->
+    <div class="section-label"><span>Universal Best Practice — Always Tag Migrated Records</span></div>
+    <div style="display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-bottom:32px;">
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent)"></span> Add Migration Provenance to Every Target Table</div>
+        <div style="font-size:12px; line-height:1.8; color:#b0c4de; margin-bottom:14px;">
+          Add two columns to every table in your new schema: <code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px; color:var(--accent3);">migrated_from VARCHAR(50)</code> and <code style="font-family:'JetBrains Mono',monospace; background:rgba(0,0,0,.4); padding:1px 5px; color:var(--accent3);">migrated_at TIMESTAMP</code>. Set them during the migration job. This gives you a permanent, queryable audit trail of every record that came from the old system vs every record created natively in the new system. Invaluable for debugging post-migration discrepancies.
+        </div>
+        <div style="background:rgba(0,0,0,.35); padding:12px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; border:1px solid var(--border); line-height:1.9;">
+          <div style="color:var(--muted);">-- In your transformer, always set:</div>
+          <div style="color:var(--accent3);">'migrated_from' => <span style="color:var(--accent2);">'legacy_c_platform'</span>,</div>
+          <div style="color:var(--accent3);">'migrated_at'   => <span style="color:var(--accent);">Carbon::now()</span>,</div>
+          <div style="margin-top:8px; color:var(--muted);">-- Query post-migration:</div>
+          <div><span style="color:var(--accent);">SELECT</span> COUNT(*), migrated_from <span style="color:var(--accent);">FROM</span> transactions</div>
+          <div style="padding-left:12px;"><span style="color:var(--accent);">GROUP BY</span> migrated_from;</div>
+          <div style="margin-top:4px; color:var(--muted);">-- legacy_c_platform | 4,829,442</div>
+          <div style="color:var(--muted);">-- NULL (native)      | 1,204</div>
+        </div>
+      </div>
+
+      <!-- DECISION MATRIX -->
+      <div class="panel">
+        <div class="panel-title"><span class="dot" style="background:var(--accent4)"></span> Strategy Selection Matrix</div>
+        <div style="display:flex; flex-direction:column; gap:6px; font-size:10px;">
+          <div style="display:grid; grid-template-columns:1fr auto; gap:8px; padding:7px 10px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-left:3px solid var(--accent); font-family:'JetBrains Mono',monospace;">
+            <div>
+              <div style="color:var(--accent); font-weight:700; margin-bottom:2px;">Column renames only</div>
+              <div style="color:var(--muted);">Use declarative ColumnMap</div>
+            </div>
+            <div style="color:var(--accent); font-size:16px; align-self:center;">①</div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:8px; padding:7px 10px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-left:3px solid var(--accent4); font-family:'JetBrains Mono',monospace;">
+            <div>
+              <div style="color:var(--accent4); font-weight:700; margin-bottom:2px;">Complex transforms</div>
+              <div style="color:var(--muted);">Add Staging Buffer</div>
+            </div>
+            <div style="color:var(--accent4); font-size:16px; align-self:center;">③</div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:8px; padding:7px 10px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-left:3px solid var(--accent2); font-family:'JetBrains Mono',monospace;">
+            <div>
+              <div style="color:var(--accent2); font-weight:700; margin-bottom:2px;">Table splits</div>
+              <div style="color:var(--muted);">Use Fanout Handler</div>
+            </div>
+            <div style="color:var(--accent2); font-size:16px; align-self:center;">④</div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:8px; padding:7px 10px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-left:3px solid var(--accent3); font-family:'JetBrains Mono',monospace;">
+            <div>
+              <div style="color:var(--accent3); font-weight:700; margin-bottom:2px;">Zero-downtime needed</div>
+              <div style="color:var(--muted);">Shadow + Dual-Write</div>
+            </div>
+            <div style="color:var(--accent3); font-size:16px; align-self:center;">⑤</div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr auto; gap:8px; padding:7px 10px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-left:3px solid var(--warn); font-family:'JetBrains Mono',monospace;">
+            <div>
+              <div style="color:var(--warn); font-weight:700; margin-bottom:2px;">Always, before anything</div>
+              <div style="color:var(--muted);">Run Dry-Run Manifest</div>
+            </div>
+            <div style="color:var(--warn); font-size:16px; align-self:center;">⑥</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end schema-divergent section -->
+
+  <!-- FOOTER -->
+  <div style="border-top:1px solid var(--border); padding-top:20px; display:flex; justify-content:space-between; align-items:center;">
+    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted);">
+      VENT AFRICA · SECURE MIGRATION BLUEPRINT · v2.0
+    </div>
+    <div style="display:flex; gap:16px;">
+      <span class="badge badge-blue">FK-Safe Import</span>
+      <span class="badge badge-green">Zero Data Loss</span>
+      <span class="badge badge-purple">Resumable</span>
+      <span class="badge badge-orange">Schema-Aware</span>
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted);">
+      CONFIDENTIAL · INTERNAL USE ONLY
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
