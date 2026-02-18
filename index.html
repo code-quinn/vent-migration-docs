@@ -67,11 +67,18 @@
     </div>
     <iframe id="doc-frame" src="migration.html"></iframe>
     <script>
-        const ACCESS_CODE = 'vent2026';
+        // SHA-256 hash of the password — original not stored in source
+        const ACCESS_HASH = '087bb49cdff6f7e5d604705dc3fc4a409251e9f59924599400ca480c7e4279e5';
 
-        function unlock() {
+        async function sha256(str) {
+            const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+            return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function unlock() {
             const input = document.getElementById('pwd');
-            if (input.value === ACCESS_CODE) {
+            const hash = await sha256(input.value);
+            if (hash === ACCESS_HASH) {
                 document.getElementById('lock-screen').style.display = 'none';
                 const frame = document.getElementById('doc-frame');
                 frame.style.display = 'block';
