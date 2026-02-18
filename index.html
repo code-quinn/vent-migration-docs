@@ -68,7 +68,7 @@
     <iframe id="doc-frame" src="migration.html"></iframe>
     <script>
         // SHA-256 hash of the password — original not stored in source
-        const ACCESS_HASH = '087bb49cdff6f7e5d604705dc3fc4a409251e9f59924599400ca480c7e4279e5';
+        const ACCESS_HASH = '876ae6a84c32e31aad1ceda9f0075ab371a6315c67fb8ad4bf7fc12dae20639d';
 
         async function sha256(str) {
             const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
